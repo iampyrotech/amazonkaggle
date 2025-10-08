@@ -2,25 +2,69 @@
 title: "Amazon Kaggle"
 format: html
 editor: visual
+author: 'Chase Nielsen
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+## Libraries
 
 ```{r}
-1 + 1
+library(tidyverse)
+library(vroom)
+library(readr)    
+library(GGally)
+library(patchwork)
+library(tidymodels)
+library(recipes)
+library(lubridate)
 ```
-
-You can add options to executable code like this
 
 ```{r}
-#| echo: false
-2 * 2
+test <- vroom("/Users/chasenielsen/Documents/Stat348/KaggleAmazon/test.csv")
+train <- vroom("/Users/chasenielsen/Documents/Stat348/KaggleAmazon/train.csv")
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+## EDA
+
+```{r}
+test %>%
+  summarise(across(everything(), ~ n_distinct(.x))) %>%
+  pivot_longer(everything(), names_to = "feature", values_to = "unique_values") %>%
+  ggplot(aes(x = reorder(feature, unique_values), y = unique_values)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Number of Unique Values per Feature",
+       x = "Feature", y = "Unique Categories") +
+  theme_minimal()
+
+test %>%
+  count(ROLE_DEPTNAME, sort = TRUE) %>%
+  slice_max(n, n = 20) %>%
+  ggplot(aes(x = reorder(as.factor(ROLE_DEPTNAME), n), y = n)) +
+  geom_col(fill = "orange") +
+  coord_flip() +
+  labs(title = "Top 20 Most Common ROLE_DEPTNAME Values",
+       x = "ROLE_DEPTNAME", y = "Count") +
+  theme_minimal()
+```
+
+## Recipe
+
+```{r}
+# Convert all predictors to factors, then dummy encode
+rec <- recipe(ACTION ~ ., data = train) %>%
+  step_mutate(across(all_predictors(), ~ as.factor(.))) %>%
+  step_novel(all_nominal_predictors()) %>%                 # unseen levels -> "new"
+  step_other(all_nominal_predictors(), threshold = 0.001, other = "other") %>%  # <0.1%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>% # one-hot
+  step_zv(all_predictors())                                # drop zero-variance
+
+# Prep on train
+rec_prep <- prep(rec, training = train, verbose = FALSE)
+
+# Bake
+train_X <- bake(rec_prep, new_data = train)
+test_X  <- bake(rec_prep, new_data = test)
+
+# Option 1: just count columns
+ncol(train_X)
+```
